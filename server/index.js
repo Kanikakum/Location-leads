@@ -11,7 +11,8 @@ app.get("/test", (req, res) => res.json({ status: "OK" }));
 
 app.post("/scrape", async (req, res) => {
   const { query } = req.body;
-  console.log("\n=== SCRAPE REQUEST:", query, "===");
+  const limit = parseInt(req.body.limit, 10) || 20;
+  console.log("\n=== SCRAPE REQUEST:", query, "limit:", limit, "===");
   if (!query) return res.status(400).json({ message: "Query is required" });
 
   let browser;
@@ -91,7 +92,7 @@ app.post("/scrape", async (req, res) => {
     console.log(`Found ${links.length} place links`);
 
     const results = [];
-    for (const link of links.slice(0, page * 20)) {
+    for (const link of links.slice(0, limit)) {
       try {
         await page.goto(link, { waitUntil: "domcontentloaded", timeout: 20000 });
         await new Promise((r) => setTimeout(r, 3000));

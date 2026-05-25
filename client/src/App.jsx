@@ -40,6 +40,8 @@ export default function App() {
   const [showKeywordSuggestions, setShowKeywordSuggestions] = useState(false);
   const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
   const [leafletReady, setLeafletReady] = useState(false);
+  const [limit, setLimit]             = useState(20);
+  const [detectingLocation, setDetectingLocation] = useState(false);
 
   const mapRef         = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -87,13 +89,47 @@ export default function App() {
   }, [view, leafletReady, filteredResults]);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
+  const detectLocation = () => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    setDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`);
+          const data = await res.json();
+          const city = data.address?.city || data.address?.town || data.address?.village || data.address?.suburb || data.address?.state || "";
+          if (city) {
+            setLocation(city);
+          } else {
+            setLocation(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+          }
+        } catch (err) {
+          console.error("Error reverse geocoding:", err);
+          setLocation(`${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`);
+        } finally {
+          setDetectingLocation(false);
+        }
+      },
+      (error) => {
+        console.error("Geolocation error:", error);
+        alert("Could not detect your location. Please type it manually.");
+        setDetectingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   const handleSearch = async () => {
     if (!keyword.trim()) { setError("Please enter a keyword"); return; }
     if (!location.trim()) { setError("Please enter a location"); return; }
     setError(""); setResults([]); setDone(false); setSelected(null); setPage(1);
     try {
       setLoading(true);
-      const res = await axios.post("http://localhost:5000/scrape", { query });
+      const res = await axios.post("http://localhost:5000/scrape", { query, limit });
       const data = res.data.results || [];
       setResults(data);
       setDone(true);
@@ -186,7 +222,7 @@ export default function App() {
         <h2 style={S.searchTitle}>Find Business Leads</h2>
         <p style={S.searchSub}>Search Google Maps by keyword + location to extract contacts</p>
 
-        <div style={S.searchGrid}>
+        <div style={S.searchGrid} id="search-grid">
           {/* Keyword input */}
           <div style={S.fieldWrap} ref={keywordRef}>
             <label style={S.label}>Keyword</label>
@@ -231,7 +267,7 @@ export default function App() {
                 <circle cx="12" cy="9" r="2" stroke="#555" strokeWidth="2" fill="none"/>
               </svg>
               <input
-                style={S.input}
+                style={{ ...S.input, paddingRight: "40px" }}
                 placeholder="e.g. Jaipur"
                 value={location}
                 onChange={e => { setLocation(e.target.value); setShowLocationSuggestions(true); }}
@@ -240,6 +276,40 @@ export default function App() {
                 onKeyDown={e => e.key === "Enter" && handleSearch()}
                 disabled={loading}
               />
+              <button
+                type="button"
+                style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: detectingLocation || loading ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: "4px",
+                  color: detectingLocation ? "#ff6b35" : "#666",
+                  transition: "color 0.2s",
+                }}
+                onClick={detectLocation}
+                disabled={detectingLocation || loading}
+                title="Detect current location"
+              >
+                {detectingLocation ? (
+                  <span style={{ ...S.spinner, width: "14px", height: "14px", border: "2px solid rgba(255,107,53,0.3)", borderTop: "2px solid #ff6b35" }} />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <circle cx="12" cy="12" r="3" />
+                    <line x1="12" y1="1" x2="12" y2="3" />
+                    <line x1="12" y1="21" x2="12" y2="23" />
+                    <line x1="1" y1="12" x2="3" y2="12" />
+                    <line x1="21" y1="12" x2="23" y2="12" />
+                  </svg>
+                )}
+              </button>
             </div>
             {showLocationSuggestions && (
               <div style={S.suggestions}>
@@ -254,6 +324,48 @@ export default function App() {
                   ))}
               </div>
             )}
+          </div>
+
+          {/* Limit input */}
+          <div style={S.fieldWrap}>
+            <label style={S.label}>Max Results</label>
+            <div style={S.inputBox}>
+              <svg style={S.inputIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#555" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+              </svg>
+              <select
+                style={S.selectInput}
+                value={limit}
+                onChange={e => setLimit(parseInt(e.target.value, 10))}
+                disabled={loading}
+              >
+                <option value={5}>5 leads (Fast)</option>
+                <option value={10}>10 leads</option>
+                <option value={20}>20 leads</option>
+                <option value={50}>50 leads</option>
+                <option value={100}>100 leads (Deep Scrape)</option>
+              </select>
+              {/* Custom dropdown arrow */}
+              <div style={{
+                position: "absolute",
+                right: "12px",
+                top: "50%",
+                transform: "translateY(-50%)",
+                pointerEvents: "none",
+                color: "#555",
+                display: "flex",
+                alignItems: "center"
+              }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+              </div>
+            </div>
           </div>
 
           {/* Search button */}
@@ -542,6 +654,11 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
         select option { background: #1a1a1a; }
         tr:hover > td { background: rgba(255,107,53,0.03) !important; }
+        @media (max-width: 768px) {
+          #search-grid {
+            grid-template-columns: 1fr !important;
+          }
+        }
       `}</style>
     </div>
   );
@@ -565,12 +682,13 @@ const S = {
   searchPanel: { maxWidth: "860px", margin: "40px auto", padding: "0 24px" },
   searchTitle: { fontSize: "30px", fontWeight: "700", color: "#fff", letterSpacing: "-0.5px", marginBottom: "6px" },
   searchSub: { fontSize: "14px", color: "#555", marginBottom: "28px" },
-  searchGrid: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "14px", alignItems: "end" },
+  searchGrid: { display: "grid", gridTemplateColumns: "1fr 1fr 130px auto", gap: "14px", alignItems: "end" },
   fieldWrap: { position: "relative" },
   label: { display: "block", fontSize: "12px", fontWeight: "600", color: "#666", marginBottom: "7px", textTransform: "uppercase", letterSpacing: "0.5px" },
   inputBox: { position: "relative" },
   inputIcon: { position: "absolute", left: "13px", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" },
   input: { width: "100%", padding: "12px 14px 12px 36px", background: "#111", border: "1px solid #222", borderRadius: "10px", color: "#fff", fontSize: "14px", outline: "none", fontFamily: "'DM Sans', sans-serif", transition: "border 0.15s" },
+  selectInput: { width: "100%", padding: "12px 32px 12px 36px", background: "#111", border: "1px solid #222", borderRadius: "10px", color: "#fff", fontSize: "14px", outline: "none", fontFamily: "'DM Sans', sans-serif", transition: "border 0.15s", cursor: "pointer", appearance: "none", WebkitAppearance: "none", MozAppearance: "none" },
   searchBtn: { padding: "12px 22px", background: "linear-gradient(135deg, #ff6b35, #ff4500)", border: "none", borderRadius: "10px", color: "#fff", fontWeight: "700", fontSize: "14px", display: "flex", alignItems: "center", gap: "8px", whiteSpace: "nowrap", fontFamily: "'DM Sans', sans-serif", boxShadow: "0 4px 20px rgba(255,107,53,0.25)" },
   spinner: { width: "13px", height: "13px", border: "2px solid rgba(255,255,255,0.3)", borderTop: "2px solid #fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" },
   suggestions: { position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "#161616", border: "1px solid #222", borderRadius: "10px", zIndex: 100, overflow: "hidden", boxShadow: "0 8px 24px rgba(0,0,0,0.5)" },
